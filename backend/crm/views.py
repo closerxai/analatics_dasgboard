@@ -25,6 +25,12 @@ from .serializers import (
     JoinRequestSerializer, JoinRequestCreateSerializer, JoinRequestDecisionSerializer,
 )
 from .permissions import is_company_admin, get_user_leads
+from django.conf import settings
+from django.utils.http import urlsafe_base64_encode, urlsafe_base64_decode
+from django.utils.encoding import force_bytes, force_str
+from django.contrib.auth.tokens import default_token_generator
+from django.core.mail import send_mail
+from django.utils.crypto import get_random_string
 
 User = get_user_model()
 logger = logging.getLogger(__name__)
@@ -1001,3 +1007,187 @@ class GHLWebhookView(APIView):
         except Exception as e:
             logger.error(f"Webhook error: {e}")
             return Response({'detail': 'Internal error'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+class LeadCreateAPIView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        membership = CompanyMember.objects.filter(
+            user=request.user,
+            is_active=True
+        ).select_related('company').first()
+
+        if not membership:
+            return Response({'detail': 'No company found.'}, status=status.HTTP_404_NOT_FOUND)
+
+        serializer = LeadCreateSerializer(data=request.data)
+        if serializer.is_valid():
+            project = serializer.validated_data['project']
+
+            if project.company_id != membership.company_id:
+                return Response(
+                    {'detail': 'Project does not belong to your company.'},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+
+            lead = serializer.save(company=membership.company)
+            return Response(LeadSerializer(lead).data, status=status.HTTP_201_CREATED)
+
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+class ForgotPasswordAPIView(APIView):
+    def post(self, request):
+        serializer = ForgotPasswordSerializer(data=request.data)
+        if serializer.is_valid():
+            user = User.objects.filter(email=serializer.validated_data['email']).first()
+
+            if user:
+                uid = urlsafe_base64_encode(force_bytes(user.pk))
+                token = default_token_generator.make_token(user)
+                reset_link = f"{settings.SITE_URL}/reset-password/?uid={uid}&token={token}"
+                send_mail(
+                    subject='Reset your password',
+                    message=f'Use this link to reset your password: {reset_link}',
+                    from_email=settings.DEFAULT_FROM_EMAIL,
+                    recipient_list=[user.email],
+                    fail_silently=False,
+                )
+
+                return Response(
+                    {
+                        'message': 'Password reset link generated successfully.',
+                        'reset_link': reset_link
+                    },
+                    status=status.HTTP_200_OK
+                )
+
+            return Response(
+                {'detail': 'User with this email does not exist.'},
+                status=status.HTTP_404_NOT_FOUND
+            )
+
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+class ResetPasswordAPIView(APIView):
+    def post(self, request):
+        serializer = ResetPasswordSerializer(data=request.data)
+        if serializer.is_valid():
+            try:
+                uid = force_str(urlsafe_base64_decode(serializer.validated_data['uid']))
+                user = User.objects.get(pk=uid)
+            except (TypeError, ValueError, OverflowError, User.DoesNotExist):
+                return Response({'detail': 'Invalid user.'}, status=status.HTTP_400_BAD_REQUEST)
+
+            if not default_token_generator.check_token(user, serializer.validated_data['token']):
+                return Response({'detail': 'Invalid or expired token.'}, status=status.HTTP_400_BAD_REQUEST)
+
+            user.set_password(serializer.validated_data['new_password'])
+            user.save()
+
+            return Response({'message': 'Password reset successful.'}, status=status.HTTP_200_OK)
+
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+    
+class ForgotEmailAPIView(APIView):
+    def post(self, request):
+        serializer = ForgotEmailSerializer(data=request.data)
+        if serializer.is_valid():
+            profile = UserProfile.objects.filter(
+                phone_number=serializer.validated_data['phone_number']
+            ).select_related('user').first()
+
+            if profile:
+                return Response(
+                    {'message': 'If an account exists, a recovery email has been sent.'},
+                    status=status.HTTP_200_OK
+                )
+
+            return Response(
+                {'message': 'If an account exists, a recovery email has been sent.'},
+                status=status.HTTP_200_OK
+            )
+
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+    
+class AdminUserCreateAPIView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        if not request.user.is_superuser:
+            return Response(
+                {'detail': 'Only superusers can create admin users.'},
+                status=status.HTTP_403_FORBIDDEN
+            )
+
+        serializer = AdminUserCreateSerializer(data=request.data)
+        if serializer.is_valid():
+            email = serializer.validated_data['email']
+            phone_number = serializer.validated_data.get('phone_number')
+            company_id = serializer.validated_data.get('company')
+
+            if User.objects.filter(email=email).exists():
+                return Response(
+                    {'detail': 'A user with this email already exists.'},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+
+            password = get_random_string(10)
+            username = email.split('@')[0]
+
+            base_username = username
+            counter = 1
+            while User.objects.filter(username=username).exists():
+                username = f'{base_username}{counter}'
+                counter += 1
+
+            user = User.objects.create_user(
+                username=username,
+                email=email,
+                password=password,
+                is_staff=True
+            )
+
+            if phone_number:
+                UserProfile.objects.create(
+                    user=user,
+                    phone_number=phone_number
+                )
+
+            if company_id:
+                company = Company.objects.filter(id=company_id).first()
+                if not company:
+                    return Response(
+                        {'detail': 'Invalid company.'},
+                        status=status.HTTP_400_BAD_REQUEST
+                    )
+
+                admin_role, _ = Role.objects.get_or_create(
+                    company=company,
+                    name='Admin',
+                    defaults={'is_default': True}
+                )
+                admin_role.permissions.set(Permission.objects.all())
+
+                CompanyMember.objects.get_or_create(
+                    user=user,
+                    company=company,
+                    defaults={
+                        'role': admin_role,
+                        'is_active': True,
+                    }
+                )
+
+            send_mail(
+                subject='Your admin account has been created',
+                message=f'Your username is {username} and your password is {password}',
+                from_email=settings.DEFAULT_FROM_EMAIL,
+                recipient_list=[email],
+                fail_silently=False,
+            )
+
+            return Response(
+                {'message': 'Admin user created successfully.'},
+                status=status.HTTP_201_CREATED
+            )
+
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)

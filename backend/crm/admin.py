@@ -12,6 +12,7 @@ from .models import (
     CompanyMember,
     JoinRequest,
     Invitation,
+    UserProfile,
 )
 
 
@@ -27,3 +28,4 @@ admin.site.register(Role)
 admin.site.register(CompanyMember)
 admin.site.register(JoinRequest)
 admin.site.register(Invitation)
+admin.site.register(UserProfile)
