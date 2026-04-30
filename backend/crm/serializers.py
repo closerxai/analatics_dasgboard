@@ -100,3 +100,8 @@ class ResetPasswordSerializer(serializers.Serializer):
 class ForgotEmailSerializer(serializers.Serializer):
     phone_number = serializers.CharField(max_length=20)
 
+class AdminUserCreateSerializer(serializers.Serializer):
+    email = serializers.EmailField()
+    phone_number = serializers.CharField(max_length=20, required=False, allow_blank=True)
+    company = serializers.IntegerField(required=False)
+
