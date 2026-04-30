@@ -118,5 +118,4 @@ class AdminUserCreateSerializer(serializers.Serializer):
     first_name = serializers.CharField(max_length=150, required=False, allow_blank=True)
     last_name = serializers.CharField(max_length=150, required=False, allow_blank=True)
     phone_number = serializers.CharField(max_length=15, required=False, allow_blank=True)
-    company = serializers.IntegerField(required=False)
-    role = serializers.ChoiceField(choices=Role.RoleName.choices, required=False, default=Role.RoleName.ADMIN)
+    company_name = serializers.CharField(max_length=255, required=False, allow_blank=True)

@@ -3,7 +3,6 @@ import secrets
 from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.contrib.auth.tokens import default_token_generator
-from django.core.mail import send_mail
 from django.db import transaction
 from django.utils.crypto import get_random_string
 from django.utils.encoding import force_bytes, force_str
@@ -15,6 +14,7 @@ from rest_framework.views import APIView
 
 from crm.models import Company
 
+from .email_sender import send_email, welcome_template
 from .models import CompanyMember, Invitation, JoinRequest, Role
 from .permissions import get_membership, is_company_admin
 from .serializers import (
@@ -35,6 +35,9 @@ from .serializers import (
 )
 
 User = get_user_model()
+
+
+
 
 
 class SignupAPIView(APIView):
@@ -275,12 +278,10 @@ class ForgotPasswordAPIView(APIView):
             uid = urlsafe_base64_encode(force_bytes(user.pk))
             token = default_token_generator.make_token(user)
             reset_link = f"{settings.SITE_URL}/reset-password/?uid={uid}&token={token}"
-            send_mail(
-                subject="Reset your password",
-                message=f"Use this link to reset your password: {reset_link}",
-                from_email=settings.DEFAULT_FROM_EMAIL,
-                recipient_list=[user.email],
-                fail_silently=False,
+            send_email(
+                "Reset your password",
+                f"<p>Use this link to reset your password:</p><p>{reset_link}</p>",
+                [user.email],
             )
 
         return Response({"message": "If an account exists, a recovery email has been sent."})
@@ -318,29 +319,24 @@ class ForgotEmailAPIView(APIView):
 
         user = User.objects.filter(phone_number=serializer.validated_data["phone_number"]).first()
         if user:
-            send_mail(
-                subject="Email recovery",
-                message=f"Your account email is {user.email}",
-                from_email=settings.DEFAULT_FROM_EMAIL,
-                recipient_list=[user.email],
-                fail_silently=False,
+            send_email(
+                "Email recovery",
+                f"<p>Your account email is <strong>{user.email}</strong>.</p>",
+                [user.email],
             )
 
         return Response({"message": "If an account exists, a recovery email has been sent."})
 
 
 class AdminUserCreateAPIView(APIView):
-    permission_classes = [IsAuthenticated]
+    permission_classes = [AllowAny]
 
     def post(self, request):
-        if not request.user.is_superuser:
-            return Response({"detail": "Only superusers can create users."}, status=status.HTTP_403_FORBIDDEN)
-
         serializer = AdminUserCreateSerializer(data=request.data)
         if not serializer.is_valid():
             return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
-        email = serializer.validated_data["email"]
+        email = serializer.validated_data["email"].strip().lower()
         if User.objects.filter(email=email).exists():
             return Response({"detail": "A user with this email already exists."}, status=status.HTTP_400_BAD_REQUEST)
 
@@ -348,12 +344,8 @@ class AdminUserCreateAPIView(APIView):
         if phone_number and User.objects.filter(phone_number=phone_number).exists():
             return Response({"detail": "A user with this phone number already exists."}, status=status.HTTP_400_BAD_REQUEST)
 
-        company = None
-        company_id = serializer.validated_data.get("company")
-        if company_id is not None:
-            company = Company.objects.filter(id=company_id).first()
-            if not company:
-                return Response({"detail": "Invalid company."}, status=status.HTTP_400_BAD_REQUEST)
+      
+        company_name = serializer.validated_data.get("company_name", "").strip()
 
         with transaction.atomic():
             password = get_random_string(10)
@@ -363,30 +355,31 @@ class AdminUserCreateAPIView(APIView):
                 first_name=serializer.validated_data.get("first_name", ""),
                 last_name=serializer.validated_data.get("last_name", ""),
                 phone_number=phone_number,
-                is_staff=True,
+                is_staff=False,
             )
 
-            if company:
-                role = Role.objects.filter(
-                    company=company,
-                    name=serializer.validated_data["role"],
-                ).first()
-                if not role:
-                    return Response({"detail": "Role not found for company."}, status=status.HTTP_400_BAD_REQUEST)
-
-                CompanyMember.objects.create(
-                    user=user,
-                    company=company,
-                    role=role,
-                    is_active=True,
-                )
-
-            send_mail(
-                subject="Your account has been created",
-                message=f"Your login email is {email} and your password is {password}",
-                from_email=settings.DEFAULT_FROM_EMAIL,
-                recipient_list=[email],
-                fail_silently=False,
+            company = Company.objects.create(
+                name=company_name,
+                is_active=True,
+            )
+            role, _ = Role.objects.get_or_create(
+                name=Role.RoleName.ADMIN,
+                defaults={"is_default": False},
+            )
+            CompanyMember.objects.create(
+                user=user,
+                company=company,
+                role=role,
+                is_active=True,
+            )
+            welcome_template(
+                email=email,
+                password=password,
+                first_name=serializer.validated_data.get("first_name", ""),
+                last_name=serializer.validated_data.get("last_name", ""),
+                company_name=company.name if company else None,
+                is_admin=bool(company),
             )
 
         return Response({"message": "User created successfully."}, status=status.HTTP_201_CREATED)
+

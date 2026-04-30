@@ -17,20 +17,6 @@ from .serializers import (
     ProjectSerializer,
 )
 
-
-def _ensure_company_roles(company):
-    default_role = None
-    for role_name in Role.RoleName.values:
-        role, _ = Role.objects.get_or_create(
-            company=company,
-            name=role_name,
-            defaults={"is_default": role_name == Role.RoleName.VIEWER},
-        )
-        if role_name == Role.RoleName.VIEWER:
-            default_role = role
-    return default_role
-
-
 class CompanyListAPIView(APIView):
     permission_classes = [IsAuthenticated]
 
@@ -51,8 +37,11 @@ class CompanyCreateAPIView(APIView):
             return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
         company = serializer.save()
-        _ensure_company_roles(company)
-        admin_role = Role.objects.get(company=company, name=Role.RoleName.ADMIN)
+        admin_role, _ = Role.objects.get_or_create(
+            company=company,
+            name=Role.RoleName.ADMIN,
+            defaults={"is_default": False},
+        )
         CompanyMember.objects.create(user=request.user, company=company, role=admin_role, is_active=True)
         CRM.objects.get_or_create(company=company)
 
