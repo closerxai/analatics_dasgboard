@@ -89,16 +89,6 @@ class LeadSource(models.Model):
         return self.name
 
 
-LEAD_STATUS_CHOICES = [
-    ("uncontacted", "Uncontacted (Pending Calls)"),
-    ("qualified", "Qualified"),
-    ("disqualified", "Disqualified"),
-    ("not_responding", "Not Responding"),
-    ("call_back", "Call Back"),
-    ("booked_site_visit", "Booked Site Visit"),
-    ("site_visit_done", "Site Visit Done"),
-    ("whatsapp", "WhatsApp"),
-]
 
 
 class Lead(models.Model):
@@ -110,7 +100,8 @@ class Lead(models.Model):
     phone = models.CharField(max_length=20, null=True, blank=True)
     source = models.ForeignKey(LeadSource, on_delete=models.SET_NULL, null=True, blank=True, related_name="leads")
     tags = models.ManyToManyField(Tag, blank=True, related_name="leads")
-    status = models.CharField(max_length=30, choices=LEAD_STATUS_CHOICES, default="uncontacted")
+    status = models.CharField(max_length=500, null=True, blank=True)
+
     assigned_to_name = models.CharField(max_length=255, null=True, blank=True)
     city = models.CharField(max_length=100, null=True, blank=True)
     planning_for_visit = models.CharField(max_length=255, null=True, blank=True)
