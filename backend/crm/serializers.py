@@ -73,3 +73,30 @@ class AssignProjectsSerializer(serializers.Serializer):
         child=serializers.IntegerField(),
         allow_empty=True
     )
+
+class LeadCreateSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Lead
+        fields = [
+            'project',
+            'crm',
+            'name',
+            'email',
+            'phone',
+            'source',
+            'tags',
+            'external_id',
+            'raw_data',
+        ]
+
+class ForgotPasswordSerializer(serializers.Serializer):
+    email = serializers.EmailField()
+
+class ResetPasswordSerializer(serializers.Serializer):
+    uid = serializers.CharField()
+    token = serializers.CharField()
+    new_password = serializers.CharField(write_only=True)
+
+class ForgotEmailSerializer(serializers.Serializer):
+    phone_number = serializers.CharField(max_length=20)
+
