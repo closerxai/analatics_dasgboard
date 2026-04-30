@@ -4,7 +4,7 @@ from rest_framework import status
 from .models import Company, Lead, CompanyMember, Role, Permission, Project, UserProfile 
 from .serializers import CompanySerializer, LeadSerializer, SignupSerializer, AssignProjectsSerializer, LeadCreateSerializer
 from .serializers import CompanyCreateSerializer, UserSerializer, CompanyMemberSerializer, RoleSerializer, CompanyMemberCreateSerializer
-from .serializers import ForgotPasswordSerializer, ResetPasswordSerializer, ForgotEmailSerializer
+from .serializers import ForgotPasswordSerializer, ResetPasswordSerializer, ForgotEmailSerializer, AdminUserCreateSerializer
 from rest_framework.permissions import IsAuthenticated
 from django.contrib.auth import get_user_model
 from .permissions import is_company_admin, get_user_leads
@@ -13,6 +13,7 @@ from django.utils.http import urlsafe_base64_encode, urlsafe_base64_decode
 from django.utils.encoding import force_bytes, force_str
 from django.contrib.auth.tokens import default_token_generator
 from django.core.mail import send_mail
+from django.utils.crypto import get_random_string
 
 User = get_user_model()
 
@@ -333,4 +334,86 @@ class ForgotEmailAPIView(APIView):
             )
 
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+    
+class AdminUserCreateAPIView(APIView):
+    permission_classes = [IsAuthenticated]
 
+    def post(self, request):
+        if not request.user.is_superuser:
+            return Response(
+                {'detail': 'Only superusers can create admin users.'},
+                status=status.HTTP_403_FORBIDDEN
+            )
+
+        serializer = AdminUserCreateSerializer(data=request.data)
+        if serializer.is_valid():
+            email = serializer.validated_data['email']
+            phone_number = serializer.validated_data.get('phone_number')
+            company_id = serializer.validated_data.get('company')
+
+            if User.objects.filter(email=email).exists():
+                return Response(
+                    {'detail': 'A user with this email already exists.'},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+
+            password = get_random_string(10)
+            username = email.split('@')[0]
+
+            base_username = username
+            counter = 1
+            while User.objects.filter(username=username).exists():
+                username = f'{base_username}{counter}'
+                counter += 1
+
+            user = User.objects.create_user(
+                username=username,
+                email=email,
+                password=password,
+                is_staff=True
+            )
+
+            if phone_number:
+                UserProfile.objects.create(
+                    user=user,
+                    phone_number=phone_number
+                )
+
+            if company_id:
+                company = Company.objects.filter(id=company_id).first()
+                if not company:
+                    return Response(
+                        {'detail': 'Invalid company.'},
+                        status=status.HTTP_400_BAD_REQUEST
+                    )
+
+                admin_role, _ = Role.objects.get_or_create(
+                    company=company,
+                    name='Admin',
+                    defaults={'is_default': True}
+                )
+                admin_role.permissions.set(Permission.objects.all())
+
+                CompanyMember.objects.get_or_create(
+                    user=user,
+                    company=company,
+                    defaults={
+                        'role': admin_role,
+                        'is_active': True,
+                    }
+                )
+
+            send_mail(
+                subject='Your admin account has been created',
+                message=f'Your username is {username} and your password is {password}',
+                from_email=settings.DEFAULT_FROM_EMAIL,
+                recipient_list=[email],
+                fail_silently=False,
+            )
+
+            return Response(
+                {'message': 'Admin user created successfully.'},
+                status=status.HTTP_201_CREATED
+            )
+
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)

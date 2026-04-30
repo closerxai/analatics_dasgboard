@@ -1,7 +1,7 @@
 from django.urls import path
 from .views import CompanyListAPIView, LeadListAPIView, SignupAPIView, CompanyMemberCreateAPIView, AssignProjectsAPIView
 from .views import CompanyCreateAPIView, MeAPIView, MyCompanyAPIView, CompanyMemberListAPIView, RoleListAPIView, LeadCreateAPIView
-from .views import ForgotPasswordAPIView, ResetPasswordAPIView, ForgotEmailAPIView
+from .views import ForgotPasswordAPIView, ResetPasswordAPIView, ForgotEmailAPIView, AdminUserCreateAPIView
 from rest_framework_simplejwt.views import TokenObtainPairView
 
 urlpatterns = [
@@ -20,4 +20,5 @@ urlpatterns = [
     path('forgot-password/', ForgotPasswordAPIView.as_view(), name='forgot-password'),
     path('reset-password/', ResetPasswordAPIView.as_view(), name='reset-password'),
     path('forgot-email/', ForgotEmailAPIView.as_view(), name='forgot-email'),
+    path('superuser/create-admin-user/', AdminUserCreateAPIView.as_view(), name='superuser-create-admin-user'),
 ]
