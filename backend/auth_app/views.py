@@ -4,6 +4,7 @@ from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.contrib.auth.tokens import default_token_generator
 from django.db import transaction
+from django.http import HttpResponse
 from django.utils.crypto import get_random_string
 from django.utils.encoding import force_bytes, force_str
 from django.utils.http import urlsafe_base64_decode, urlsafe_base64_encode
@@ -27,6 +28,7 @@ from .serializers import (
     InvitationCreateSerializer,
     InvitationSerializer,
     JoinRequestCreateSerializer,
+    JoinRequestDecisionSerializer,
     JoinRequestSerializer,
     ResetPasswordSerializer,
     RoleSerializer,
@@ -139,12 +141,9 @@ class InvitationListCreateAPIView(APIView):
         if not serializer.is_valid():
             return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
-        role = None
-        role_id = serializer.validated_data.get("role_id")
-        if role_id is not None:
-            role = Role.objects.filter(id=role_id).first()
-            if not role:
-                return Response({"detail": "Invalid role."}, status=status.HTTP_400_BAD_REQUEST)
+        role = Role.objects.filter(id=serializer.validated_data["role_id"]).first()
+        if not role:
+            return Response({"detail": "Invalid role."}, status=status.HTTP_400_BAD_REQUEST)
 
         invite_email = serializer.validated_data["email"].strip().lower()
         phone_number = serializer.validated_data.get("phone_number") or None
@@ -169,11 +168,62 @@ class InvitationListCreateAPIView(APIView):
             role=role,
             token=secrets.token_urlsafe(32),
         )
+
+        accept_link = f"{settings.SITE_URL}/api/invitations/accept/?token={invite.token}"
+        send_email(
+            "You're invited to Analytics Dashboard",
+            (
+                f"<p>You have been invited to join <strong>{membership.company.name}</strong>.</p>"
+                f"<p>Click this link to accept the invitation:</p>"
+                f"<p><a href=\"{accept_link}\">{accept_link}</a></p>"
+            ),
+            [invite_email],
+        )
+
         return Response(InvitationSerializer(invite).data, status=status.HTTP_201_CREATED)
 
 
 class InvitationAcceptAPIView(APIView):
     permission_classes = [AllowAny]
+
+    def get(self, request):
+        token = request.query_params.get("token", "").strip()
+        if not token:
+            return HttpResponse("<h2>Invalid invitation link.</h2>", status=400)
+
+        invitation = Invitation.objects.filter(token=token).first()
+        if not invitation or invitation.is_accepted:
+            return HttpResponse("<h2>Invitation is invalid or already accepted.</h2>", status=400)
+
+        html = f"""
+        <html>
+          <body style="font-family: Arial, sans-serif; max-width: 480px; margin: 40px auto;">
+            <h2>Accept Invitation</h2>
+            <p>Email: <strong>{invitation.email}</strong></p>
+            <form method="post" action="/api/invitations/accept/">
+              <input type="hidden" name="token" value="{token}" />
+              <div style="margin-bottom: 12px;">
+                <label>First name</label><br />
+                <input type="text" name="first_name" style="width: 100%; padding: 8px;" />
+              </div>
+              <div style="margin-bottom: 12px;">
+                <label>Last name</label><br />
+                <input type="text" name="last_name" style="width: 100%; padding: 8px;" />
+              </div>
+              <div style="margin-bottom: 12px;">
+                <label>Phone number</label><br />
+                <input type="text" name="phone_number" style="width: 100%; padding: 8px;" />
+              </div>
+              <div style="margin-bottom: 12px;">
+                <label>Password</label><br />
+                <input type="password" name="password" style="width: 100%; padding: 8px;" required />
+              </div>
+              <button type="submit" style="padding: 10px 16px;">Accept Invitation</button>
+            </form>
+          </body>
+        </html>
+        """
+        return HttpResponse(html)
 
     def post(self, request):
         serializer = InvitationAcceptSerializer(data=request.data)
@@ -184,9 +234,9 @@ class InvitationAcceptAPIView(APIView):
         if not invitation or invitation.is_accepted:
             return Response({"detail": "Invalid or expired invitation."}, status=status.HTTP_400_BAD_REQUEST)
 
-        role = invitation.role or Role.objects.filter(is_default=True).first()
+        role = invitation.role
         if not role:
-            return Response({"detail": "No default role found for this company."}, status=status.HTTP_400_BAD_REQUEST)
+            return Response({"detail": "No role found for this invitation."}, status=status.HTTP_400_BAD_REQUEST)
 
         user = invitation.user or User.objects.filter(email=invitation.email).first()
         if not user:
@@ -253,7 +303,7 @@ class JoinRequestListAPIView(APIView):
         return Response(JoinRequestSerializer(join_requests, many=True).data)
 
 
-class JoinRequestApproveAPIView(APIView):
+class JoinRequestDecisionAPIView(APIView):
     permission_classes = [IsAuthenticated]
 
     def post(self, request, join_request_id):
@@ -261,7 +311,7 @@ class JoinRequestApproveAPIView(APIView):
         if not membership:
             return Response({"detail": "No company found."}, status=status.HTTP_404_NOT_FOUND)
         if not is_company_admin(request.user, membership.company):
-            return Response({"detail": "Only admins can approve join requests."}, status=status.HTTP_403_FORBIDDEN)
+            return Response({"detail": "Only admins can decide join requests."}, status=status.HTTP_403_FORBIDDEN)
 
         join_request = JoinRequest.objects.filter(
             id=join_request_id,
@@ -271,14 +321,29 @@ class JoinRequestApproveAPIView(APIView):
         if not join_request:
             return Response({"detail": "Join request not found."}, status=status.HTTP_404_NOT_FOUND)
 
+        serializer = JoinRequestDecisionSerializer(data=request.data)
+        if not serializer.is_valid():
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+        decision = serializer.validated_data["status"]
+
+        if decision == "rejected":
+            join_request.status = JoinRequest.Status.REJECTED
+            join_request.save(update_fields=["status"])
+            return Response({"message": "Join request rejected."})
+
         if User.objects.filter(email=join_request.email).exists():
             return Response({"detail": "A user with this email already exists."}, status=status.HTTP_400_BAD_REQUEST)
         if join_request.phone_number and User.objects.filter(phone_number=join_request.phone_number).exists():
             return Response({"detail": "A user with this phone number already exists."}, status=status.HTTP_400_BAD_REQUEST)
 
-        role = Role.objects.filter(is_default=True).first()
+        role_id = serializer.validated_data.get("role_id")
+        if not role_id:
+            return Response({"detail": "role_id is required when approving a join request."}, status=status.HTTP_400_BAD_REQUEST)
+
+        role = Role.objects.filter(id=role_id).first()
         if not role:
-            return Response({"detail": "No default role found."}, status=status.HTTP_400_BAD_REQUEST)
+            return Response({"detail": "Invalid role."}, status=status.HTTP_400_BAD_REQUEST)
 
         password = get_random_string(10)
         user = User.objects.create_user(
@@ -301,29 +366,6 @@ class JoinRequestApproveAPIView(APIView):
             is_admin=role.name == Role.RoleName.ADMIN,
         )
         return Response({"message": "Join request approved."})
-
-
-class JoinRequestRejectAPIView(APIView):
-    permission_classes = [IsAuthenticated]
-
-    def post(self, request, join_request_id):
-        membership = get_membership(request.user)
-        if not membership:
-            return Response({"detail": "No company found."}, status=status.HTTP_404_NOT_FOUND)
-        if not is_company_admin(request.user, membership.company):
-            return Response({"detail": "Only admins can reject join requests."}, status=status.HTTP_403_FORBIDDEN)
-
-        join_request = JoinRequest.objects.filter(
-            id=join_request_id,
-            company=membership.company,
-            status=JoinRequest.Status.PENDING,
-        ).first()
-        if not join_request:
-            return Response({"detail": "Join request not found."}, status=status.HTTP_404_NOT_FOUND)
-
-        join_request.status = JoinRequest.Status.REJECTED
-        join_request.save(update_fields=["status"])
-        return Response({"message": "Join request rejected."})
 
 
 class ForgotPasswordAPIView(APIView):

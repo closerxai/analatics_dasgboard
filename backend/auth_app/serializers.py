@@ -73,7 +73,7 @@ class InvitationSerializer(serializers.ModelSerializer):
 
 class InvitationCreateSerializer(serializers.Serializer):
     email = serializers.EmailField()
-    role_id = serializers.IntegerField(required=False, allow_null=True)
+    role_id = serializers.IntegerField(required=True)
     first_name = serializers.CharField(max_length=150, required=False, allow_blank=True)
     last_name = serializers.CharField(max_length=150, required=False, allow_blank=True)
     phone_number = serializers.CharField(max_length=15, required=False, allow_blank=True)
@@ -118,6 +118,11 @@ class JoinRequestCreateSerializer(serializers.Serializer):
         if not Company.objects.filter(id=value).exists():
             raise serializers.ValidationError("Company not found.")
         return value
+
+
+class JoinRequestDecisionSerializer(serializers.Serializer):
+    status = serializers.ChoiceField(choices=[("approved", "Approved"), ("rejected", "Rejected")])
+    role_id = serializers.IntegerField(required=False)
 
 
 class ForgotPasswordSerializer(serializers.Serializer):
