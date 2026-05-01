@@ -1,5 +1,12 @@
+from rest_framework.permissions import BasePermission
+
 from auth_app.models import CompanyMember, Role
 from crm.models import Lead, Project
+
+
+class IsSuperUser(BasePermission):
+    def has_permission(self, request, view):
+        return bool(request.user and request.user.is_authenticated and request.user.is_superuser)
 
 
 def get_membership(user):
