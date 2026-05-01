@@ -16,7 +16,7 @@ from crm.models import Company
 
 from .email_sender import send_email, welcome_template
 from .models import CompanyMember, Invitation, JoinRequest, Role
-from .permissions import get_membership, is_company_admin
+from .permissions import IsSuperUser, get_membership, is_company_admin
 from .serializers import (
     AdminUserCreateSerializer,
     AssignProjectsSerializer,
@@ -329,7 +329,7 @@ class ForgotEmailAPIView(APIView):
 
 
 class AdminUserCreateAPIView(APIView):
-    permission_classes = [AllowAny]
+    permission_classes = [IsSuperUser]
 
     def post(self, request):
         serializer = AdminUserCreateSerializer(data=request.data)
@@ -382,4 +382,3 @@ class AdminUserCreateAPIView(APIView):
             )
 
         return Response({"message": "User created successfully."}, status=status.HTTP_201_CREATED)
-
