@@ -126,10 +126,20 @@ GHL_WEBHOOK_SECRET = config('GHL_WEBHOOK_SECRET', default='')
 
 SITE_URL = config('SITE_URL', default='http://127.0.0.1:8000')
 
-EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
-EMAIL_HOST = config('EMAIL_HOST', default='smtp.gmail.com')
-EMAIL_PORT = config('EMAIL_PORT', default=587, cast=int)
-EMAIL_HOST_USER = config('EMAIL_HOST_USER', default='')
-EMAIL_HOST_PASSWORD = config('EMAIL_HOST_PASSWORD', default='')
-EMAIL_USE_TLS = _env_bool(config('EMAIL_USE_TLS', default='true'), default=True)
-DEFAULT_FROM_EMAIL = config('DEFAULT_FROM_EMAIL', default=EMAIL_HOST_USER)
+# EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
+# EMAIL_HOST = config('EMAIL_HOST', default='smtp.gmail.com')
+# EMAIL_PORT = config('EMAIL_PORT', default=587, cast=int)
+# EMAIL_HOST_USER = config('EMAIL_HOST_USER', default='')
+# EMAIL_HOST_PASSWORD = config('EMAIL_HOST_PASSWORD', default='')
+# EMAIL_USE_TLS = _env_bool(config('EMAIL_USE_TLS', default='true'), default=True)
+# DEFAULT_FROM_EMAIL = config('DEFAULT_FROM_EMAIL', default=EMAIL_HOST_USER)
+# EMAIL_BACKEND = "sendgrid_backend.SendgridBackend"
+# SENDGRID_API_KEY = config('SENDGRID_API_KEY', default='')
+# SENDGRID_FROM_EMAIL = config('SENDGRID_FROM_EMAIL', default="")
+# SENDGRID_FROM_NAME = config('SENDGRID_FROM_NAME', default='Analytics Dashboard')
+
+
+EMAIL_BACKEND = "sendgrid_backend.SendgridBackend"
+SENDGRID_API_KEY = config('SENDGRID_API_KEY', default='')
+SENDGRID_FROM_EMAIL = "no-reply@email-update.com"
+ACCESS_KEY = "priotheadmin"

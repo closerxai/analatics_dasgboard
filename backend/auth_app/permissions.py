@@ -1,5 +1,13 @@
+from django.conf import settings
+from rest_framework.permissions import BasePermission
+
 from auth_app.models import CompanyMember, Role
 from crm.models import Lead, Project
+
+
+class HasAccessKey(BasePermission):
+    def has_permission(self, request, view):
+        return request.headers.get("X-ACCESS-KEY") == settings.ACCESS_KEY
 
 
 def get_membership(user):

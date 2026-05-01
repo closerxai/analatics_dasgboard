@@ -10,6 +10,6 @@ admin.site.has_permission = _superuser_only_admin_has_permission
 
 urlpatterns = [
     path('admin/', admin.site.urls),
-    path('api/', include('auth_app.urls')),
+    path('api/auth/', include('auth_app.urls')),
     path('api/', include('crm.urls')),
 ]
