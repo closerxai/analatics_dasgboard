@@ -331,22 +331,16 @@ class ForgotEmailAPIView(APIView):
 class AdminUserCreateAPIView(APIView):
     permission_classes = [HasAccessKey]
     def post(self, request):
-        
         serializer = AdminUserCreateSerializer(data=request.data)
         if not serializer.is_valid():
             return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-
         email = serializer.validated_data["email"].strip().lower()
         if User.objects.filter(email=email).exists():
             return Response({"detail": "A user with this email already exists."}, status=status.HTTP_400_BAD_REQUEST)
-
         phone_number = serializer.validated_data.get("phone_number") or None
         if phone_number and User.objects.filter(phone_number=phone_number).exists():
             return Response({"detail": "A user with this phone number already exists."}, status=status.HTTP_400_BAD_REQUEST)
-
-      
         company_name = serializer.validated_data.get("company_name", "").strip()
-
         with transaction.atomic():
             password = get_random_string(10)
             user = User.objects.create_user(
