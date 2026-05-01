@@ -16,7 +16,7 @@ from crm.models import Company
 
 from .email_sender import send_email, welcome_template
 from .models import CompanyMember, Invitation, JoinRequest, Role
-from .permissions import HasAccessKey, get_membership, is_company_admin
+from .permissions import HasAccessKey, IsSuperUser, get_membership, is_company_admin
 from .serializers import (
     AdminUserCreateSerializer,
     AssignProjectsSerializer,
@@ -66,7 +66,7 @@ class RoleListAPIView(APIView):
         if not membership:
             return Response({"detail": "No company found."}, status=status.HTTP_404_NOT_FOUND)
 
-        roles = Role.objects.filter(company=membership.company)
+        roles = Role.objects.all()
         return Response(RoleSerializer(roles, many=True).data)
 
 
@@ -142,12 +142,29 @@ class InvitationListCreateAPIView(APIView):
         role = None
         role_id = serializer.validated_data.get("role_id")
         if role_id is not None:
-            role = Role.objects.filter(id=role_id, company=membership.company).first()
+            role = Role.objects.filter(id=role_id).first()
             if not role:
                 return Response({"detail": "Invalid role."}, status=status.HTTP_400_BAD_REQUEST)
 
+        invite_email = serializer.validated_data["email"].strip().lower()
+        phone_number = serializer.validated_data.get("phone_number") or None
+        if phone_number and User.objects.filter(phone_number=phone_number).exclude(email=invite_email).exists():
+            return Response({"detail": "Phone number already exists."}, status=status.HTTP_400_BAD_REQUEST)
+
+        user = User.objects.filter(email=invite_email).first()
+        if user is None:
+            user = User.objects.create_user(
+                email=invite_email,
+                password=get_random_string(16),
+                first_name=serializer.validated_data.get("first_name", ""),
+                last_name=serializer.validated_data.get("last_name", ""),
+                phone_number=phone_number,
+                is_active=False,
+            )
+
         invite = Invitation.objects.create(
-            email=serializer.validated_data["email"],
+            email=invite_email,
+            user=user,
             company=membership.company,
             role=role,
             token=secrets.token_urlsafe(32),
@@ -156,44 +173,66 @@ class InvitationListCreateAPIView(APIView):
 
 
 class InvitationAcceptAPIView(APIView):
-    permission_classes = [IsAuthenticated]
+    permission_classes = [AllowAny]
 
     def post(self, request):
         serializer = InvitationAcceptSerializer(data=request.data)
         if not serializer.is_valid():
             return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
-        invitation = Invitation.objects.filter(token=serializer.validated_data["token"]).select_related("company", "role").first()
+        invitation = Invitation.objects.filter(token=serializer.validated_data["token"]).select_related("company", "role", "user").first()
         if not invitation or invitation.is_accepted:
             return Response({"detail": "Invalid or expired invitation."}, status=status.HTTP_400_BAD_REQUEST)
-        if request.user.email.lower() != invitation.email.lower():
-            return Response({"detail": "This invitation does not match your account email."}, status=status.HTTP_403_FORBIDDEN)
-        if CompanyMember.objects.filter(user=request.user, is_active=True).exists():
-            return Response({"detail": "You already belong to a company."}, status=status.HTTP_400_BAD_REQUEST)
 
-        role = invitation.role or Role.objects.filter(company=invitation.company, is_default=True).first()
+        role = invitation.role or Role.objects.filter(is_default=True).first()
         if not role:
             return Response({"detail": "No default role found for this company."}, status=status.HTTP_400_BAD_REQUEST)
 
-        CompanyMember.objects.create(user=request.user, company=invitation.company, role=role, is_active=True)
+        user = invitation.user or User.objects.filter(email=invitation.email).first()
+        if not user:
+            user = User.objects.create_user(email=invitation.email, password=get_random_string(16), is_active=False)
+
+        phone_number = serializer.validated_data.get("phone_number") or user.phone_number
+        if phone_number and User.objects.filter(phone_number=phone_number).exclude(id=user.id).exists():
+            return Response({"detail": "Phone number already exists."}, status=status.HTTP_400_BAD_REQUEST)
+
+        user.first_name = serializer.validated_data.get("first_name", user.first_name)
+        user.last_name = serializer.validated_data.get("last_name", user.last_name)
+        user.phone_number = phone_number
+        user.is_active = True
+        user.set_password(serializer.validated_data["password"])
+        user.save()
+
+        if CompanyMember.objects.filter(user=user, is_active=True).exists():
+            return Response({"detail": "You already belong to a company."}, status=status.HTTP_400_BAD_REQUEST)
+
+        CompanyMember.objects.create(user=user, company=invitation.company, role=role, is_active=True)
         invitation.is_accepted = True
-        invitation.save(update_fields=["is_accepted"])
+        invitation.user = user
+        invitation.save(update_fields=["is_accepted", "user"])
         return Response({"message": "Invitation accepted successfully"})
 
 
 class JoinRequestCreateAPIView(APIView):
-    permission_classes = [IsAuthenticated]
+    permission_classes = [AllowAny]
 
     def post(self, request):
-        if CompanyMember.objects.filter(user=request.user, is_active=True).exists():
-            return Response({"detail": "You already belong to a company."}, status=status.HTTP_400_BAD_REQUEST)
-
         serializer = JoinRequestCreateSerializer(data=request.data)
         if not serializer.is_valid():
             return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
+        email = serializer.validated_data["email"].strip().lower()
+        phone_number = serializer.validated_data.get("phone_number") or None
+        if User.objects.filter(email=email).exists():
+            return Response({"detail": "A user with this email already exists."}, status=status.HTTP_400_BAD_REQUEST)
+        if phone_number and User.objects.filter(phone_number=phone_number).exists():
+            return Response({"detail": "A user with this phone number already exists."}, status=status.HTTP_400_BAD_REQUEST)
+
         join_request = JoinRequest.objects.create(
-            user=request.user,
+            email=email,
+            first_name=serializer.validated_data.get("first_name", ""),
+            last_name=serializer.validated_data.get("last_name", ""),
+            phone_number=phone_number,
             company_id=serializer.validated_data["company_id"],
             message=serializer.validated_data["message"],
         )
@@ -210,7 +249,7 @@ class JoinRequestListAPIView(APIView):
         if not is_company_admin(request.user, membership.company):
             return Response({"detail": "Only admins can view join requests."}, status=status.HTTP_403_FORBIDDEN)
 
-        join_requests = JoinRequest.objects.filter(company=membership.company).select_related("user", "company")
+        join_requests = JoinRequest.objects.filter(company=membership.company).select_related("company")
         return Response(JoinRequestSerializer(join_requests, many=True).data)
 
 
@@ -228,17 +267,39 @@ class JoinRequestApproveAPIView(APIView):
             id=join_request_id,
             company=membership.company,
             status=JoinRequest.Status.PENDING,
-        ).select_related("user", "company").first()
+        ).select_related("company").first()
         if not join_request:
             return Response({"detail": "Join request not found."}, status=status.HTTP_404_NOT_FOUND)
 
-        role = Role.objects.filter(company=membership.company, is_default=True).first()
+        if User.objects.filter(email=join_request.email).exists():
+            return Response({"detail": "A user with this email already exists."}, status=status.HTTP_400_BAD_REQUEST)
+        if join_request.phone_number and User.objects.filter(phone_number=join_request.phone_number).exists():
+            return Response({"detail": "A user with this phone number already exists."}, status=status.HTTP_400_BAD_REQUEST)
+
+        role = Role.objects.filter(is_default=True).first()
         if not role:
             return Response({"detail": "No default role found."}, status=status.HTTP_400_BAD_REQUEST)
 
-        CompanyMember.objects.create(user=join_request.user, company=membership.company, role=role, is_active=True)
+        password = get_random_string(10)
+        user = User.objects.create_user(
+            email=join_request.email,
+            password=password,
+            first_name=join_request.first_name,
+            last_name=join_request.last_name,
+            phone_number=join_request.phone_number,
+            is_active=True,
+        )
+        CompanyMember.objects.create(user=user, company=membership.company, role=role, is_active=True)
         join_request.status = JoinRequest.Status.APPROVED
         join_request.save(update_fields=["status"])
+        welcome_template(
+            email=user.email,
+            password=password,
+            first_name=user.first_name,
+            last_name=user.last_name,
+            company_name=membership.company.name,
+            is_admin=role.name == Role.RoleName.ADMIN,
+        )
         return Response({"message": "Join request approved."})
 
 
@@ -329,7 +390,8 @@ class ForgotEmailAPIView(APIView):
 
 
 class AdminUserCreateAPIView(APIView):
-    permission_classes = [HasAccessKey]
+    permission_classes = [AllowAny]
+
     def post(self, request):
         serializer = AdminUserCreateSerializer(data=request.data)
         if not serializer.is_valid():
@@ -376,4 +438,3 @@ class AdminUserCreateAPIView(APIView):
             )
 
         return Response({"message": "User created successfully."}, status=status.HTTP_201_CREATED)
-
