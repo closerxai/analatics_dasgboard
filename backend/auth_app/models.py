@@ -89,9 +89,10 @@ class JoinRequest(models.Model):
         APPROVED = "approved", "Approved"
         REJECTED = "rejected", "Rejected"
 
-    user = models.ForeignKey(
-        "auth_app.CustomUser", on_delete=models.CASCADE, related_name="join_requests"
-    )
+    email = models.EmailField()
+    first_name = models.CharField(max_length=150, blank=True, default="")
+    last_name = models.CharField(max_length=150, blank=True, default="")
+    phone_number = models.CharField(max_length=15, null=True, blank=True)
     company = models.ForeignKey(
         "crm.Company", on_delete=models.CASCADE, related_name="join_requests"
     )
@@ -103,11 +104,18 @@ class JoinRequest(models.Model):
         ordering = ["-created_at"]
 
     def __str__(self):
-        return f"{self.user.email} -> {self.company.name} ({self.status})"
+        return f"{self.email} -> {self.company.name} ({self.status})"
 
 
 class Invitation(models.Model):
     email = models.EmailField()
+    user = models.ForeignKey(
+        "auth_app.CustomUser",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="pending_invitations",
+    )
     company = models.ForeignKey(
         "crm.Company", on_delete=models.CASCADE, related_name="invitations"
     )

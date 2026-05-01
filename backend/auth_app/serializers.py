@@ -68,29 +68,50 @@ class InvitationSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Invitation
-        fields = ["id", "email", "role", "token", "is_accepted", "created_at"]
+        fields = ["id", "email", "user", "role", "token", "is_accepted", "created_at"]
 
 
 class InvitationCreateSerializer(serializers.Serializer):
     email = serializers.EmailField()
     role_id = serializers.IntegerField(required=False, allow_null=True)
+    first_name = serializers.CharField(max_length=150, required=False, allow_blank=True)
+    last_name = serializers.CharField(max_length=150, required=False, allow_blank=True)
+    phone_number = serializers.CharField(max_length=15, required=False, allow_blank=True)
 
 
 class InvitationAcceptSerializer(serializers.Serializer):
     token = serializers.CharField()
+    first_name = serializers.CharField(max_length=150, required=False, allow_blank=True)
+    last_name = serializers.CharField(max_length=150, required=False, allow_blank=True)
+    phone_number = serializers.CharField(max_length=15, required=False, allow_blank=True)
+    password = serializers.CharField(write_only=True, min_length=8)
 
 
 class JoinRequestSerializer(serializers.ModelSerializer):
-    user = UserSerializer(read_only=True)
     company_name = serializers.CharField(source="company.name", read_only=True)
 
     class Meta:
         model = JoinRequest
-        fields = ["id", "user", "company", "company_name", "status", "message", "created_at"]
+        fields = [
+            "id",
+            "email",
+            "first_name",
+            "last_name",
+            "phone_number",
+            "company",
+            "company_name",
+            "status",
+            "message",
+            "created_at",
+        ]
 
 
 class JoinRequestCreateSerializer(serializers.Serializer):
     company_id = serializers.IntegerField()
+    email = serializers.EmailField()
+    first_name = serializers.CharField(max_length=150, required=False, allow_blank=True)
+    last_name = serializers.CharField(max_length=150, required=False, allow_blank=True)
+    phone_number = serializers.CharField(max_length=15, required=False, allow_blank=True)
     message = serializers.CharField(required=False, allow_blank=True, default="")
 
     def validate_company_id(self, value):
