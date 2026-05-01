@@ -1,4 +1,6 @@
+import requests
 from rest_framework import status
+from rest_framework.permissions import AllowAny
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -13,6 +15,7 @@ from .serializers import (
     CompanySerializer,
     CompanyUpdateSerializer,
     LeadCreateSerializer,
+    LeadPhoneHistorySerializer,
     LeadSerializer,
     ProjectSerializer,
 )
@@ -136,3 +139,43 @@ class LeadCreateAPIView(APIView):
 
         lead = serializer.save(company=membership.company)
         return Response(LeadSerializer(lead).data, status=status.HTTP_201_CREATED)
+
+
+class LeadPhoneHistoryAPIView(APIView):
+    permission_classes = [AllowAny]
+
+    def post(self, request):
+        serializer = LeadPhoneHistorySerializer(data=request.data)
+        if not serializer.is_valid():
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+        headers = {
+            "x-api-key": serializer.validated_data["agni_api_key"].strip(),
+            "organization-id": serializer.validated_data["organization_id"].strip(),
+        }
+        params = {
+            "phone": serializer.validated_data["contact_number"],
+            "page": 1,
+            "page_size": 20,
+            "include_transcripts": "true",
+        }
+
+        try:
+            response = requests.get(
+                "https://api.ravan.ai/api/v1/calling/phone-history",
+                params=params,
+                headers=headers,
+                timeout=30,
+            )
+        except requests.RequestException as exc:
+            return Response(
+                {"detail": "Failed to connect to Ravan API.", "error": str(exc)},
+                status=status.HTTP_502_BAD_GATEWAY,
+            )
+
+        try:
+            data = response.json()
+        except ValueError:
+            data = {"detail": response.text}
+
+        return Response(data, status=response.status_code)

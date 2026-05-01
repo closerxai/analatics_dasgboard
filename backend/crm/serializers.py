@@ -115,3 +115,9 @@ class SyncLogSerializer(serializers.ModelSerializer):
             "date_to",
             "triggered_by_email",
         ]
+
+
+class LeadPhoneHistorySerializer(serializers.Serializer):
+    contact_number = serializers.CharField(max_length=30)
+    agni_api_key = serializers.CharField(max_length=500)
+    organization_id = serializers.CharField(max_length=255)

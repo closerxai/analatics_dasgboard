@@ -4,6 +4,7 @@ from .views import (
     CompanyCreateAPIView,
     CompanyListAPIView,
     LeadCreateAPIView,
+    LeadPhoneHistoryAPIView,
     LeadListAPIView,
     MyCompanyAPIView,
     ProjectListCreateAPIView,
@@ -16,4 +17,5 @@ urlpatterns = [
     path("projects/", ProjectListCreateAPIView.as_view(), name="project-list-create"),
     path("leads/", LeadListAPIView.as_view(), name="lead-list"),
     path("leads/create/", LeadCreateAPIView.as_view(), name="lead-create"),
+    path("lead/phone-history/", LeadPhoneHistoryAPIView.as_view(), name="lead-phone-history"),
 ]
